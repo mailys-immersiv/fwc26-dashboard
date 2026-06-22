@@ -130,8 +130,8 @@ def _clean(raw: pd.DataFrame) -> pd.DataFrame:
     for col in ["New Visitors", "Returning Visitors"]:
         df[col] = _to_numeric_col(df[col]) if col in df.columns else None
 
-    match_col = next((c for c in ["BBC Matches", "FWC Matches"] if c in df.columns), None)
-    df["Match"] = _clean_match(df[match_col]) if match_col else ""
+    df["BBC Match"] = _clean_match(df["BBC Matches"]) if "BBC Matches" in df.columns else ""
+    df["FWC Match"] = _clean_match(df["FWC Matches"]) if "FWC Matches" in df.columns else ""
 
     return (
         df.dropna(subset=["DateTime"])
@@ -164,12 +164,18 @@ LEFT_TRACES = {
     "Returning Visitors":dict(color="#9333ea", fill=False),
 }
 
-def build_figure(df: pd.DataFrame, show: dict, show_matches: bool = True) -> go.Figure:
+def _match_label(m):
+    return m if (isinstance(m, str) and m.strip() not in ("", "nan", "none", "null")) else "Pas de match"
+
+
+def build_figure(df: pd.DataFrame, show: dict, show_bbc: bool = True, show_fwc: bool = True) -> go.Figure:
     fig = go.Figure()
 
-    match_labels = df["Match"].apply(
-        lambda m: m if (isinstance(m, str) and m.strip() not in ("", "nan", "none", "null")) else "Pas de match"
-    )
+    bbc_labels = df["BBC Match"].apply(_match_label) if "BBC Match" in df.columns else pd.Series("Pas de match", index=df.index)
+    fwc_labels = df["FWC Match"].apply(_match_label) if "FWC Match" in df.columns else pd.Series("Pas de match", index=df.index)
+
+    # Hover : priorité BBC puis FWC
+    hover_match = bbc_labels.where(bbc_labels != "Pas de match", fwc_labels)
 
     # ── Courbes axe gauche ─────────────────────────────────────────────────
     for col, style in LEFT_TRACES.items():
@@ -183,7 +189,7 @@ def build_figure(df: pd.DataFrame, show: dict, show_matches: bool = True) -> go.
             line=dict(color=style["color"], width=2),
             fill="tozeroy" if style["fill"] else "none",
             fillcolor="rgba(26,108,219,0.10)" if style["fill"] else None,
-            customdata=match_labels,
+            customdata=hover_match,
             hovertemplate=(
                 f"<b>%{{x|%d %b %H:%M}}</b><br>"
                 f"{col} : <b>%{{y:,}}</b><br>"
@@ -198,7 +204,7 @@ def build_figure(df: pd.DataFrame, show: dict, show_matches: bool = True) -> go.
         mode="lines",
         visible=True if show.get("Session (min)", True) else "legendonly",
         line=dict(color="#e88a00", width=2),
-        customdata=match_labels,
+        customdata=hover_match,
         hovertemplate=(
             "<b>%{x|%d %b %H:%M}</b><br>"
             "Session : <b>%{y:.1f} min</b><br>"
@@ -208,19 +214,26 @@ def build_figure(df: pd.DataFrame, show: dict, show_matches: bool = True) -> go.
 
     # ── Lignes verticales matchs ───────────────────────────────────────────
     shapes, annotations = [], []
-    if show_matches:
-        for _, row in df[df["Match"] != ""].iterrows():
+
+    MATCH_STYLES = [
+        ("BBC Match", show_bbc, "rgba(200,30,30,0.6)",  "#c01e1e",  "🇬🇧"),
+        ("FWC Match", show_fwc, "rgba(30,120,200,0.6)", "#1a6cdb",  "🏆"),
+    ]
+    for match_col, visible, line_color, text_color, icon in MATCH_STYLES:
+        if not visible or match_col not in df.columns:
+            continue
+        for _, row in df[df[match_col] != ""].iterrows():
             xv = row["DateTime"]
             shapes.append(dict(
                 type="line", x0=xv, x1=xv,
                 yref="paper", y0=0, y1=1,
-                line=dict(color="rgba(200,30,30,0.6)", width=1.5, dash="dash"),
+                line=dict(color=line_color, width=1.5, dash="dash"),
             ))
             annotations.append(dict(
                 x=xv, yref="paper", y=1.01,
-                text=f"⚽ {row['Match']}",
+                text=f"{icon} {row[match_col]}",
                 showarrow=False, textangle=-45,
-                font=dict(size=8.5, color="#c01e1e"),
+                font=dict(size=8.5, color=text_color),
                 xanchor="left",
             ))
 
@@ -287,7 +300,8 @@ def sidebar_controls(df: pd.DataFrame):
 
     st.sidebar.markdown("---")
     st.sidebar.markdown("**Événements**")
-    show_matches = st.sidebar.checkbox("Labels matchs BBC", value=True)
+    show_bbc = st.sidebar.checkbox("⚽ Matchs BBC", value=True)
+    show_fwc = st.sidebar.checkbox("🏆 Matchs FWC", value=True)
 
     st.sidebar.markdown("---")
     min_d = df["DateTime"].min().date()
@@ -310,7 +324,7 @@ def sidebar_controls(df: pd.DataFrame):
         f"**{len(filtered):,}** lignes · "
         f"**{(filtered['Match'] != '').sum()}** match(s)"
     )
-    return filtered, show, show_matches
+    return filtered, show, show_bbc, show_fwc
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -323,8 +337,8 @@ def main():
         "Zoom : dessinez un rectangle sur le graphique"
     )
 
-    df                             = load_data()
-    filtered, show, show_matches   = sidebar_controls(df)
+    df                                   = load_data()
+    filtered, show, show_bbc, show_fwc   = sidebar_controls(df)
 
     if filtered.empty:
         st.warning("Aucune donnée pour la plage sélectionnée.")
@@ -333,12 +347,16 @@ def main():
     c1, c2, c3 = st.columns(3)
     c1.metric("Visiteurs totaux",   f"{int(filtered['Total Visitors'].sum()):,}")
     c2.metric("Session moy. (min)", f"{filtered['Session (min)'].mean():.1f}")
-    c3.metric("Matchs BBC",    filtered[filtered["Match"] != ""]["Match"].nunique())
+    n_matches = pd.concat([
+        filtered["BBC Match"] if "BBC Match" in filtered.columns else pd.Series(dtype=str),
+        filtered["FWC Match"] if "FWC Match" in filtered.columns else pd.Series(dtype=str),
+    ]).pipe(lambda s: s[s != ""]).nunique()
+    c3.metric("Matchs détectés", n_matches)
 
-    st.plotly_chart(build_figure(filtered, show, show_matches), use_container_width=True)
+    st.plotly_chart(build_figure(filtered, show, show_bbc, show_fwc), use_container_width=True)
 
     with st.expander("📄 Données brutes"):
-        cols = ["DateTime", "Total Visitors", "New Visitors", "Returning Visitors", "Session (min)", "Match"]
+        cols = ["DateTime", "Total Visitors", "New Visitors", "Returning Visitors", "Session (min)", "BBC Match", "FWC Match"]
         cols = [c for c in cols if c in filtered.columns]
         st.dataframe(
             filtered[cols].rename(columns={"DateTime": "Date/Heure"}),
