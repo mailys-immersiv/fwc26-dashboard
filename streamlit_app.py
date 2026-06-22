@@ -164,7 +164,7 @@ LEFT_TRACES = {
     "Returning Visitors":dict(color="#9333ea", fill=False),
 }
 
-def build_figure(df: pd.DataFrame, show: dict) -> go.Figure:
+def build_figure(df: pd.DataFrame, show: dict, show_matches: bool = True) -> go.Figure:
     fig = go.Figure()
 
     match_labels = df["Match"].apply(
@@ -208,20 +208,21 @@ def build_figure(df: pd.DataFrame, show: dict) -> go.Figure:
 
     # ── Lignes verticales matchs ───────────────────────────────────────────
     shapes, annotations = [], []
-    for _, row in df[df["Match"] != ""].iterrows():
-        xv = row["DateTime"]
-        shapes.append(dict(
-            type="line", x0=xv, x1=xv,
-            yref="paper", y0=0, y1=1,
-            line=dict(color="rgba(200,30,30,0.6)", width=1.5, dash="dash"),
-        ))
-        annotations.append(dict(
-            x=xv, yref="paper", y=1.01,
-            text=f"⚽ {row['Match']}",
-            showarrow=False, textangle=-45,
-            font=dict(size=8.5, color="#c01e1e"),
-            xanchor="left",
-        ))
+    if show_matches:
+        for _, row in df[df["Match"] != ""].iterrows():
+            xv = row["DateTime"]
+            shapes.append(dict(
+                type="line", x0=xv, x1=xv,
+                yref="paper", y0=0, y1=1,
+                line=dict(color="rgba(200,30,30,0.6)", width=1.5, dash="dash"),
+            ))
+            annotations.append(dict(
+                x=xv, yref="paper", y=1.01,
+                text=f"⚽ {row['Match']}",
+                showarrow=False, textangle=-45,
+                font=dict(size=8.5, color="#c01e1e"),
+                xanchor="left",
+            ))
 
     range_buttons = [
         dict(count=1, label="24 h",    step="day", stepmode="backward"),
@@ -278,11 +279,15 @@ def sidebar_controls(df: pd.DataFrame):
     st.sidebar.markdown("**Courbes affichées**")
 
     show = {
-        "Total Visitors":     st.sidebar.checkbox("Total Visitors",     value=True),
-        "New Visitors":       st.sidebar.checkbox("New Visitors",       value=False),
-        "Returning Visitors": st.sidebar.checkbox("Returning Visitors", value=False),
+        "Total Visitors":     st.sidebar.checkbox("Total Visitors",        value=True),
+        "New Visitors":       st.sidebar.checkbox("New Visitors",          value=False),
+        "Returning Visitors": st.sidebar.checkbox("Returning Visitors",    value=False),
         "Session (min)":      st.sidebar.checkbox("Session moyenne (min)", value=True),
     }
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**Événements**")
+    show_matches = st.sidebar.checkbox("Labels matchs BBC", value=True)
 
     st.sidebar.markdown("---")
     min_d = df["DateTime"].min().date()
@@ -305,7 +310,7 @@ def sidebar_controls(df: pd.DataFrame):
         f"**{len(filtered):,}** lignes · "
         f"**{(filtered['Match'] != '').sum()}** match(s)"
     )
-    return filtered, show
+    return filtered, show, show_matches
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -318,8 +323,8 @@ def main():
         "Zoom : dessinez un rectangle sur le graphique"
     )
 
-    df               = load_data()
-    filtered, show   = sidebar_controls(df)
+    df                             = load_data()
+    filtered, show, show_matches   = sidebar_controls(df)
 
     if filtered.empty:
         st.warning("Aucune donnée pour la plage sélectionnée.")
@@ -330,7 +335,7 @@ def main():
     c2.metric("Session moy. (min)", f"{filtered['Session (min)'].mean():.1f}")
     c3.metric("Matchs BBC",    filtered[filtered["Match"] != ""]["Match"].nunique())
 
-    st.plotly_chart(build_figure(filtered, show), use_container_width=True)
+    st.plotly_chart(build_figure(filtered, show, show_matches), use_container_width=True)
 
     with st.expander("📄 Données brutes"):
         cols = ["DateTime", "Total Visitors", "New Visitors", "Returning Visitors", "Session (min)", "Match"]
