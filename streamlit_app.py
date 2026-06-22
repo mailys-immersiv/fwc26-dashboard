@@ -212,20 +212,14 @@ def build_figure(df: pd.DataFrame, show: dict, show_bbc: bool = True, show_fwc: 
         ),
     ))
 
-    # ── Lignes verticales + axes du haut pour les matchs ─────────────────────
-    shapes = []
+    # ── Lignes verticales matchs ───────────────────────────────────────────
+    shapes, annotations = [], []
 
     MATCH_STYLES = [
-        ("BBC Match", show_bbc, "rgba(200,30,30,0.55)", "#c01e1e", "⚽"),
-        ("FWC Match", show_fwc, "rgba(30,120,200,0.55)", "#1a6cdb", "🏆"),
+        ("BBC Match", show_bbc, "rgba(200,30,30,0.6)",  "#c01e1e",  "🇬🇧"),
+        ("FWC Match", show_fwc, "rgba(30,120,200,0.6)", "#1a6cdb",  "🏆"),
     ]
-
-    # Collecte tickvals/ticktext pour chaque axe du haut
-    bbc_ticks = {"vals": [], "texts": []}
-    fwc_ticks = {"vals": [], "texts": []}
-    tick_buckets = {"BBC Match": bbc_ticks, "FWC Match": fwc_ticks}
-
-    for match_col, visible, line_color, _, icon in MATCH_STYLES:
+    for match_col, visible, line_color, text_color, icon in MATCH_STYLES:
         if not visible or match_col not in df.columns:
             continue
         for _, row in df[df[match_col] != ""].iterrows():
@@ -235,9 +229,13 @@ def build_figure(df: pd.DataFrame, show: dict, show_bbc: bool = True, show_fwc: 
                 yref="paper", y0=0, y1=1,
                 line=dict(color=line_color, width=1.5, dash="dash"),
             ))
-            bucket = tick_buckets[match_col]
-            bucket["vals"].append(xv)
-            bucket["texts"].append(f"{icon} {row[match_col]}")
+            annotations.append(dict(
+                x=xv, yref="paper", y=1.01,
+                text=f"{icon} {row[match_col]}",
+                showarrow=False, textangle=-45,
+                font=dict(size=8.5, color=text_color),
+                xanchor="left",
+            ))
 
     range_buttons = [
         dict(count=1, label="24 h",    step="day", stepmode="backward"),
@@ -246,69 +244,23 @@ def build_figure(df: pd.DataFrame, show: dict, show_bbc: bool = True, show_fwc: 
         dict(step="all", label="Tout"),
     ]
 
-    # Axe X principal
-    xaxis_cfg = dict(
-        title="Date / Heure",
-        gridcolor="#e8e8e8",
-        rangeselector=dict(buttons=range_buttons),
-        rangeslider=dict(visible=True, thickness=0.06),
-        type="date",
-    )
-
-    # xaxis2 — BBC Matches en haut (rouge)
-    xaxis2_cfg = dict(
-        overlaying="x", side="top",
-        type="date",
-        tickvals=bbc_ticks["vals"] if show_bbc else [],
-        ticktext=bbc_ticks["texts"] if show_bbc else [],
-        tickangle=-40,
-        tickfont=dict(size=9, color="#c01e1e"),
-        showgrid=False, zeroline=False,
-        ticks="outside", ticklen=6, tickcolor="#c01e1e",
-        matches="x",
-    )
-
-    # xaxis3 — FWC Matches en haut (bleu), décalé légèrement
-    xaxis3_cfg = dict(
-        overlaying="x", side="top",
-        type="date",
-        tickvals=fwc_ticks["vals"] if show_fwc else [],
-        ticktext=fwc_ticks["texts"] if show_fwc else [],
-        tickangle=-40,
-        tickfont=dict(size=9, color="#1a6cdb"),
-        showgrid=False, zeroline=False,
-        ticks="outside", ticklen=6, tickcolor="#1a6cdb",
-        matches="x",
-    )
-
-    # Trace fantôme pour activer xaxis2 et xaxis3
-    if show_bbc and bbc_ticks["vals"]:
-        fig.add_trace(go.Scatter(
-            x=bbc_ticks["vals"], y=[None] * len(bbc_ticks["vals"]),
-            xaxis="x2", yaxis="y1",
-            mode="markers", marker=dict(size=0, opacity=0),
-            showlegend=False, hoverinfo="skip",
-        ))
-    if show_fwc and fwc_ticks["vals"]:
-        fig.add_trace(go.Scatter(
-            x=fwc_ticks["vals"], y=[None] * len(fwc_ticks["vals"]),
-            xaxis="x3", yaxis="y1",
-            mode="markers", marker=dict(size=0, opacity=0),
-            showlegend=False, hoverinfo="skip",
-        ))
-
     fig.update_layout(
         title="<b>FWC 26 — Trafic horaire</b> · Visiteurs & Durée de session",
-        height=620,
+        height=580,
         hovermode="x unified",
         shapes=shapes,
-        legend=dict(orientation="h", y=1.02, x=0),
+        annotations=annotations,
+        legend=dict(orientation="h", y=1.06, x=0),
         plot_bgcolor="#ffffff",
         paper_bgcolor="#ffffff",
         font=dict(color="#111111"),
-        xaxis=xaxis_cfg,
-        xaxis2=xaxis2_cfg,
-        xaxis3=xaxis3_cfg,
+        xaxis=dict(
+            title="Date / Heure",
+            gridcolor="#e8e8e8",
+            rangeselector=dict(buttons=range_buttons),
+            rangeslider=dict(visible=True, thickness=0.06),
+            type="date",
+        ),
         yaxis=dict(
             title="Visiteurs",
             gridcolor="#e8e8e8",
@@ -321,7 +273,7 @@ def build_figure(df: pd.DataFrame, show: dict, show_bbc: bool = True, show_fwc: 
             overlaying="y", side="right",
             rangemode="tozero", showgrid=False,
         ),
-        margin=dict(t=140, r=70, b=50, l=70),
+        margin=dict(t=100, r=70, b=50, l=70),
         dragmode="zoom",
     )
     return fig
