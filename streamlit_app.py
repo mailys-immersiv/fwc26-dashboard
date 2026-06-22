@@ -328,7 +328,7 @@ def main():
     c1, c2, c3 = st.columns(3)
     c1.metric("Visiteurs totaux",   f"{int(filtered['Total Visitors'].sum()):,}")
     c2.metric("Session moy. (min)", f"{filtered['Session (min)'].mean():.1f}")
-    c3.metric("Matchs détectés",    filtered[filtered["Match"] != ""]["Match"].nunique())
+    c3.metric("Matchs BBC",    filtered[filtered["Match"] != ""]["Match"].nunique())
 
     st.plotly_chart(build_figure(filtered, show), use_container_width=True)
 
