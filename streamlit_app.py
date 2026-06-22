@@ -153,13 +153,21 @@ def load_data() -> pd.DataFrame:
 def build_figure(df: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
 
+    # Prépare le texte de match pour le hover (ligne par ligne)
+    match_labels = df["Match"].apply(lambda m: m if m != "" else "Pas de match")
+
     fig.add_trace(go.Scatter(
         x=df["DateTime"], y=df["Total Visitors"],
         name="Total Visitors", yaxis="y1",
         mode="lines",
         line=dict(color="#1a6cdb", width=2),
         fill="tozeroy", fillcolor="rgba(26,108,219,0.12)",
-        hovertemplate="<b>%{x|%d %b %H:%M}</b><br>Visiteurs : <b>%{y:,}</b><extra></extra>",
+        customdata=match_labels,
+        hovertemplate=(
+            "<b>%{x|%d %b %H:%M}</b><br>"
+            "Visiteurs : <b>%{y:,}</b><br>"
+            "Match : %{customdata}<extra></extra>"
+        ),
     ))
 
     fig.add_trace(go.Scatter(
@@ -167,7 +175,12 @@ def build_figure(df: pd.DataFrame) -> go.Figure:
         name="Session moy. (min)", yaxis="y2",
         mode="lines",
         line=dict(color="#e88a00", width=2, dash="dot"),
-        hovertemplate="<b>%{x|%d %b %H:%M}</b><br>Session : <b>%{y:.1f} min</b><extra></extra>",
+        customdata=match_labels,
+        hovertemplate=(
+            "<b>%{x|%d %b %H:%M}</b><br>"
+            "Session : <b>%{y:.1f} min</b><br>"
+            "Match : %{customdata}<extra></extra>"
+        ),
     ))
 
     shapes, annotations = [], []
@@ -200,8 +213,12 @@ def build_figure(df: pd.DataFrame) -> go.Figure:
         shapes=shapes,
         annotations=annotations,
         legend=dict(orientation="h", y=1.06, x=0),
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#ffffff",
+        font=dict(color="#111111"),
         xaxis=dict(
             title="Date / Heure",
+            gridcolor="#e8e8e8",
             rangeselector=dict(buttons=range_buttons),
             rangeslider=dict(visible=True, thickness=0.06),
             type="date",
@@ -210,6 +227,7 @@ def build_figure(df: pd.DataFrame) -> go.Figure:
             title="Total Visitors",
             title_font=dict(color="#1a6cdb"),
             tickfont=dict(color="#1a6cdb"),
+            gridcolor="#e8e8e8",
             rangemode="tozero",
         ),
         yaxis2=dict(
@@ -275,11 +293,10 @@ def main():
         st.warning("Aucune donnée pour la plage sélectionnée.")
         return
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3 = st.columns(3)
     c1.metric("Visiteurs totaux",   f"{int(filtered['Total Visitors'].sum()):,}")
-    c2.metric("Pic de trafic",      f"{int(filtered['Total Visitors'].max()):,}")
-    c3.metric("Session moy. (min)", f"{filtered['Session (min)'].mean():.1f}")
-    c4.metric("Matchs détectés",    filtered[filtered["Match"] != ""]["Match"].nunique())
+    c2.metric("Session moy. (min)", f"{filtered['Session (min)'].mean():.1f}")
+    c3.metric("Matchs détectés",    filtered[filtered["Match"] != ""]["Match"].nunique())
 
     st.plotly_chart(build_figure(filtered), use_container_width=True)
 
