@@ -322,7 +322,7 @@ def sidebar_controls(df: pd.DataFrame):
     st.sidebar.markdown("---")
     st.sidebar.markdown(
         f"**{len(filtered):,}** lignes · "
-        f"**{(filtered['Match'] != '').sum()}** match(s)"
+        f"**{((filtered.get('BBC Match', '') != '') | (filtered.get('FWC Match', '') != '')).sum()}** match(s)"
     )
     return filtered, show, show_bbc, show_fwc
 
