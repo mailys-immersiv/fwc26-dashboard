@@ -156,7 +156,7 @@ def load_data() -> pd.DataFrame:
 
 # ── Chart ──────────────────────────────────────────────────────────────────────
 
-def build_figure(df: pd.DataFrame) -> go.Figure:
+def build_figure(df: pd.DataFrame, show_visitors: bool = True, show_session: bool = True) -> go.Figure:
     fig = go.Figure()
 
     # Prépare le texte de match pour le hover (ligne par ligne)
@@ -168,6 +168,7 @@ def build_figure(df: pd.DataFrame) -> go.Figure:
         x=df["DateTime"], y=df["Total Visitors"],
         name="Total Visitors", yaxis="y1",
         mode="lines",
+        visible=True if show_visitors else "legendonly",
         line=dict(color="#1a6cdb", width=2),
         fill="tozeroy", fillcolor="rgba(26,108,219,0.12)",
         customdata=match_labels,
@@ -182,7 +183,8 @@ def build_figure(df: pd.DataFrame) -> go.Figure:
         x=df["DateTime"], y=df["Session (min)"],
         name="Session moy. (min)", yaxis="y2",
         mode="lines",
-        line=dict(color="#e88a00", width=2, dash="dot"),
+        visible=True if show_session else "legendonly",
+        line=dict(color="#e88a00", width=2),
         customdata=match_labels,
         hovertemplate=(
             "<b>%{x|%d %b %H:%M}</b><br>"
@@ -253,12 +255,17 @@ def build_figure(df: pd.DataFrame) -> go.Figure:
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 
-def sidebar_controls(df: pd.DataFrame) -> pd.DataFrame:
+def sidebar_controls(df: pd.DataFrame):
     st.sidebar.title("⚽ FWC 26 · Filtres")
 
     if st.sidebar.button("🔄 Forcer la synchronisation Google Sheets"):
         load_data.clear()
         st.rerun()
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**Courbes affichées**")
+    show_visitors = st.sidebar.checkbox("Total Visitors", value=True)
+    show_session  = st.sidebar.checkbox("Session moyenne (min)", value=True)
 
     st.sidebar.markdown("---")
     min_d = df["DateTime"].min().date()
@@ -281,7 +288,7 @@ def sidebar_controls(df: pd.DataFrame) -> pd.DataFrame:
         f"**{len(filtered):,}** lignes · "
         f"**{(filtered['Match'] != '').sum()}** match(s)"
     )
-    return filtered
+    return filtered, show_visitors, show_session
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -294,8 +301,8 @@ def main():
         "Zoom : dessinez un rectangle sur le graphique"
     )
 
-    df       = load_data()
-    filtered = sidebar_controls(df)
+    df                              = load_data()
+    filtered, show_visitors, show_session = sidebar_controls(df)
 
     if filtered.empty:
         st.warning("Aucune donnée pour la plage sélectionnée.")
@@ -306,7 +313,10 @@ def main():
     c2.metric("Session moy. (min)", f"{filtered['Session (min)'].mean():.1f}")
     c3.metric("Matchs détectés",    filtered[filtered["Match"] != ""]["Match"].nunique())
 
-    st.plotly_chart(build_figure(filtered), use_container_width=True)
+    st.plotly_chart(
+        build_figure(filtered, show_visitors, show_session),
+        use_container_width=True,
+    )
 
     with st.expander("📄 Données brutes"):
         st.dataframe(
