@@ -120,11 +120,17 @@ def _clean(raw: pd.DataFrame) -> pd.DataFrame:
     df["Total Visitors"] = pd.to_numeric(df["Total Visitors"], errors="coerce")
     df["Session (min)"] = df["Average session time"].apply(_duration_to_minutes)
 
-    match_col = next((c for c in ["FWC Matches", "BBC Matches"] if c in df.columns), None)
-    df["Match"] = (
-        df[match_col].astype(str).str.strip().replace({"nan": "", "None": ""})
-        if match_col else ""
-    )
+    match_col = next((c for c in ["BBC Matches", "FWC Matches"] if c in df.columns), None)
+    if match_col:
+        # Remplace les vraies valeurs NaN puis nettoie les strings parasites
+        raw_match = df[match_col].where(df[match_col].notna(), "")
+        raw_match = raw_match.astype(str).str.strip()
+        raw_match = raw_match.replace({"nan": "", "none": "", "None": "", "NaN": ""}, regex=False)
+        # Ne garder qu'une seule occurrence par match : effacer les doublons consécutifs
+        raw_match = raw_match.where(raw_match != raw_match.shift(), "")
+        df["Match"] = raw_match
+    else:
+        df["Match"] = ""
 
     return (
         df.dropna(subset=["DateTime"])
@@ -154,7 +160,9 @@ def build_figure(df: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
 
     # Prépare le texte de match pour le hover (ligne par ligne)
-    match_labels = df["Match"].apply(lambda m: m if m != "" else "Pas de match")
+    match_labels = df["Match"].apply(
+        lambda m: m if (isinstance(m, str) and m.strip() not in ("", "nan", "none", "null")) else "Pas de match"
+    )
 
     fig.add_trace(go.Scatter(
         x=df["DateTime"], y=df["Total Visitors"],
