@@ -1,12 +1,12 @@
 """
 FWC 26 — Traffic Analytics Dashboard
-Stratégie de connexion automatique :
-  1. Si st.secrets contient [gcp_service_account] → gspread (sheet privé)
-  2. Sinon → export CSV gviz (sheet doit être "public" ou "visible par le lien")
+Sheet public (visible par le lien) — aucun credential requis.
+SHEET_ID est lu depuis st.secrets["SHEET_ID"] ou la variable d'env SHEET_ID.
 """
 
+import os
 import re
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -19,9 +19,14 @@ st.set_page_config(
     layout="wide",
 )
 
-SHEET_ID   = "1j3PNyXzN28Ll3L8zW7Rx5UAXvCQz1yMHQ3Jcz_Z1B7U"
+# SHEET_ID lu depuis les secrets Streamlit, sinon depuis la variable d'env
+SHEET_ID   = st.secrets.get("SHEET_ID", os.environ.get("SHEET_ID", ""))
 SHEET_NAME = "FWC 26 - Chart data"
 YEAR       = 2026
+
+if not SHEET_ID:
+    st.error("Variable **SHEET_ID** manquante. Ajoutez-la dans les Secrets Streamlit Cloud ou en variable d'environnement.")
+    st.stop()
 
 CSV_URL = (
     f"https://docs.google.com/spreadsheets/d/{SHEET_ID}"
@@ -128,41 +133,16 @@ def _clean(raw: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-# ── Data loading — two strategies ─────────────────────────────────────────────
-
-def _load_via_gspread() -> pd.DataFrame:
-    """Load from a private sheet using a GCP service account stored in st.secrets."""
-    import gspread
-    from google.oauth2.service_account import Credentials
-
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets.readonly",
-        "https://www.googleapis.com/auth/drive.readonly",
-    ]
-    creds = Credentials.from_service_account_info(
-        dict(st.secrets["gcp_service_account"]),
-        scopes=scopes,
-    )
-    client = gspread.authorize(creds)
-    sheet  = client.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
-    data   = sheet.get_all_values()
-    return pd.DataFrame(data[1:], columns=data[0])
-
-
-def _load_via_csv() -> pd.DataFrame:
-    """Load from a publicly shared sheet (no credentials needed)."""
-    return pd.read_csv(CSV_URL, header=0)
-
+# ── Data loading ───────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=300, show_spinner="📡 Chargement depuis Google Sheets…")
 def load_data() -> pd.DataFrame:
-    use_service_account = "gcp_service_account" in st.secrets
     try:
-        raw = _load_via_gspread() if use_service_account else _load_via_csv()
+        raw = pd.read_csv(CSV_URL, header=0)
     except Exception as exc:
         st.error(
             f"**Erreur de connexion Google Sheets** : {exc}\n\n"
-            "Vérifiez que le sheet est partagé ou que les credentials sont corrects."
+            "Vérifiez que le sheet est bien partagé en 'Visible par le lien'."
         )
         st.stop()
     return _clean(raw)
