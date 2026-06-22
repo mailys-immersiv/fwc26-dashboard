@@ -1,5 +1,6 @@
 """
 FWC 26 — Traffic Analytics Dashboard
+Source : onglet "FWC26 - Raw data - DO NOT TOUCH"
 Sheet public (visible par le lien) — aucun credential requis.
 SHEET_ID est lu depuis st.secrets["SHEET_ID"] ou la variable d'env SHEET_ID.
 """
@@ -19,13 +20,12 @@ st.set_page_config(
     layout="wide",
 )
 
-# SHEET_ID lu depuis les secrets Streamlit, sinon depuis la variable d'env
 SHEET_ID   = st.secrets.get("SHEET_ID", os.environ.get("SHEET_ID", ""))
-SHEET_NAME = "FWC 26 - Chart data"
+SHEET_NAME = "FWC26 - Raw data - DO NOT TOUCH"
 YEAR       = 2026
 
 if not SHEET_ID:
-    st.error("Variable **SHEET_ID** manquante. Ajoutez-la dans les Secrets Streamlit Cloud ou en variable d'environnement.")
+    st.error("Variable **SHEET_ID** manquante. Ajoutez-la dans les Secrets Streamlit Cloud.")
     st.stop()
 
 CSV_URL = (
@@ -40,15 +40,12 @@ MONTH_MAP = {
     "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
 }
 
-FULL_DATE_RE = re.compile(r"^\s*(\d{1,2})\s+([A-Za-z]{3})\s+(\d{1,2}:\d{2})\s*$")
+# Accepte "12 Jun 00:00" et "12 Jun, 00:00" (avec ou sans virgule)
+FULL_DATE_RE = re.compile(r"^\s*(\d{1,2})\s+([A-Za-z]{3}),?\s+(\d{1,2}:\d{2})\s*$")
 TIME_ONLY_RE = re.compile(r"^\s*(\d{1,2}:\d{2})\s*$")
 
 
 def _forward_fill_dates(series: pd.Series) -> pd.Series:
-    """
-    Propagate the date part ('12 Jun') onto time-only rows ('01:00', '02:00')
-    until the next full-date row appears.
-    """
     current_day = None
     result = []
     for raw_val in series:
@@ -97,6 +94,21 @@ def _duration_to_minutes(value) -> float | None:
     return None
 
 
+def _to_numeric_col(series: pd.Series) -> pd.Series:
+    return pd.to_numeric(
+        series.astype(str).str.replace(",", "", regex=False).str.strip(),
+        errors="coerce",
+    )
+
+
+def _clean_match(series: pd.Series) -> pd.Series:
+    raw = series.where(series.notna(), "")
+    raw = raw.astype(str).str.strip()
+    raw = raw.replace({"nan": "", "none": "", "None": "", "NaN": ""}, regex=False)
+    # Garder uniquement la première occurrence de chaque match consécutif
+    return raw.where(raw != raw.shift(), "")
+
+
 def _clean(raw: pd.DataFrame) -> pd.DataFrame:
     df = raw.copy()
     df.columns = [c.strip() for c in df.columns]
@@ -106,31 +118,20 @@ def _clean(raw: pd.DataFrame) -> pd.DataFrame:
     if missing:
         st.error(
             f"Colonnes manquantes : **{missing}**\n\n"
-            f"Colonnes trouvées : `{list(df.columns)}`\n\n"
-            "Vérifiez que le nom de l'onglet et les en-têtes correspondent exactement."
+            f"Colonnes trouvées : `{list(df.columns)}`"
         )
         st.stop()
 
-    df["_date_str"]     = _forward_fill_dates(df["Date"])
-    df["DateTime"]      = df["_date_str"].apply(_parse_datetime)
-    df["Total Visitors"] = (
-        df["Total Visitors"].astype(str)
-        .str.replace(",", "", regex=False).str.strip()
-    )
-    df["Total Visitors"] = pd.to_numeric(df["Total Visitors"], errors="coerce")
-    df["Session (min)"] = df["Average session time"].apply(_duration_to_minutes)
+    df["_date_str"]      = _forward_fill_dates(df["Date"])
+    df["DateTime"]       = df["_date_str"].apply(_parse_datetime)
+    df["Total Visitors"] = _to_numeric_col(df["Total Visitors"])
+    df["Session (min)"]  = df["Average session time"].apply(_duration_to_minutes)
+
+    for col in ["New Visitors", "Returning Visitors"]:
+        df[col] = _to_numeric_col(df[col]) if col in df.columns else None
 
     match_col = next((c for c in ["BBC Matches", "FWC Matches"] if c in df.columns), None)
-    if match_col:
-        # Remplace les vraies valeurs NaN puis nettoie les strings parasites
-        raw_match = df[match_col].where(df[match_col].notna(), "")
-        raw_match = raw_match.astype(str).str.strip()
-        raw_match = raw_match.replace({"nan": "", "none": "", "None": "", "NaN": ""}, regex=False)
-        # Ne garder qu'une seule occurrence par match : effacer les doublons consécutifs
-        raw_match = raw_match.where(raw_match != raw_match.shift(), "")
-        df["Match"] = raw_match
-    else:
-        df["Match"] = ""
+    df["Match"] = _clean_match(df[match_col]) if match_col else ""
 
     return (
         df.dropna(subset=["DateTime"])
@@ -156,34 +157,46 @@ def load_data() -> pd.DataFrame:
 
 # ── Chart ──────────────────────────────────────────────────────────────────────
 
-def build_figure(df: pd.DataFrame, show_visitors: bool = True, show_session: bool = True) -> go.Figure:
+# Palette des courbes axe gauche
+LEFT_TRACES = {
+    "Total Visitors":    dict(color="#1a6cdb", fill=True),
+    "New Visitors":      dict(color="#16a34a", fill=False),
+    "Returning Visitors":dict(color="#9333ea", fill=False),
+}
+
+def build_figure(df: pd.DataFrame, show: dict) -> go.Figure:
     fig = go.Figure()
 
-    # Prépare le texte de match pour le hover (ligne par ligne)
     match_labels = df["Match"].apply(
         lambda m: m if (isinstance(m, str) and m.strip() not in ("", "nan", "none", "null")) else "Pas de match"
     )
 
-    fig.add_trace(go.Scatter(
-        x=df["DateTime"], y=df["Total Visitors"],
-        name="Total Visitors", yaxis="y1",
-        mode="lines",
-        visible=True if show_visitors else "legendonly",
-        line=dict(color="#1a6cdb", width=2),
-        fill="tozeroy", fillcolor="rgba(26,108,219,0.12)",
-        customdata=match_labels,
-        hovertemplate=(
-            "<b>%{x|%d %b %H:%M}</b><br>"
-            "Visiteurs : <b>%{y:,}</b><br>"
-            "Match : %{customdata}<extra></extra>"
-        ),
-    ))
+    # ── Courbes axe gauche ─────────────────────────────────────────────────
+    for col, style in LEFT_TRACES.items():
+        if col not in df.columns or df[col].isna().all():
+            continue
+        fig.add_trace(go.Scatter(
+            x=df["DateTime"], y=df[col],
+            name=col, yaxis="y1",
+            mode="lines",
+            visible=True if show.get(col, True) else "legendonly",
+            line=dict(color=style["color"], width=2),
+            fill="tozeroy" if style["fill"] else "none",
+            fillcolor="rgba(26,108,219,0.10)" if style["fill"] else None,
+            customdata=match_labels,
+            hovertemplate=(
+                f"<b>%{{x|%d %b %H:%M}}</b><br>"
+                f"{col} : <b>%{{y:,}}</b><br>"
+                "Match : %{customdata}<extra></extra>"
+            ),
+        ))
 
+    # ── Courbe axe droit : Session ─────────────────────────────────────────
     fig.add_trace(go.Scatter(
         x=df["DateTime"], y=df["Session (min)"],
         name="Session moy. (min)", yaxis="y2",
         mode="lines",
-        visible=True if show_session else "legendonly",
+        visible=True if show.get("Session (min)", True) else "legendonly",
         line=dict(color="#e88a00", width=2),
         customdata=match_labels,
         hovertemplate=(
@@ -193,6 +206,7 @@ def build_figure(df: pd.DataFrame, show_visitors: bool = True, show_session: boo
         ),
     ))
 
+    # ── Lignes verticales matchs ───────────────────────────────────────────
     shapes, annotations = [], []
     for _, row in df[df["Match"] != ""].iterrows():
         xv = row["DateTime"]
@@ -234,9 +248,7 @@ def build_figure(df: pd.DataFrame, show_visitors: bool = True, show_session: boo
             type="date",
         ),
         yaxis=dict(
-            title="Total Visitors",
-            title_font=dict(color="#1a6cdb"),
-            tickfont=dict(color="#1a6cdb"),
+            title="Visiteurs",
             gridcolor="#e8e8e8",
             rangemode="tozero",
         ),
@@ -264,8 +276,13 @@ def sidebar_controls(df: pd.DataFrame):
 
     st.sidebar.markdown("---")
     st.sidebar.markdown("**Courbes affichées**")
-    show_visitors = st.sidebar.checkbox("Total Visitors", value=True)
-    show_session  = st.sidebar.checkbox("Session moyenne (min)", value=True)
+
+    show = {
+        "Total Visitors":     st.sidebar.checkbox("Total Visitors",     value=True),
+        "New Visitors":       st.sidebar.checkbox("New Visitors",       value=False),
+        "Returning Visitors": st.sidebar.checkbox("Returning Visitors", value=False),
+        "Session (min)":      st.sidebar.checkbox("Session moyenne (min)", value=True),
+    }
 
     st.sidebar.markdown("---")
     min_d = df["DateTime"].min().date()
@@ -288,7 +305,7 @@ def sidebar_controls(df: pd.DataFrame):
         f"**{len(filtered):,}** lignes · "
         f"**{(filtered['Match'] != '').sum()}** match(s)"
     )
-    return filtered, show_visitors, show_session
+    return filtered, show
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -301,8 +318,8 @@ def main():
         "Zoom : dessinez un rectangle sur le graphique"
     )
 
-    df                              = load_data()
-    filtered, show_visitors, show_session = sidebar_controls(df)
+    df               = load_data()
+    filtered, show   = sidebar_controls(df)
 
     if filtered.empty:
         st.warning("Aucune donnée pour la plage sélectionnée.")
@@ -313,15 +330,13 @@ def main():
     c2.metric("Session moy. (min)", f"{filtered['Session (min)'].mean():.1f}")
     c3.metric("Matchs détectés",    filtered[filtered["Match"] != ""]["Match"].nunique())
 
-    st.plotly_chart(
-        build_figure(filtered, show_visitors, show_session),
-        use_container_width=True,
-    )
+    st.plotly_chart(build_figure(filtered, show), use_container_width=True)
 
     with st.expander("📄 Données brutes"):
+        cols = ["DateTime", "Total Visitors", "New Visitors", "Returning Visitors", "Session (min)", "Match"]
+        cols = [c for c in cols if c in filtered.columns]
         st.dataframe(
-            filtered[["DateTime", "Total Visitors", "Session (min)", "Match"]]
-            .rename(columns={"DateTime": "Date/Heure"}),
+            filtered[cols].rename(columns={"DateTime": "Date/Heure"}),
             use_container_width=True,
             hide_index=True,
         )
