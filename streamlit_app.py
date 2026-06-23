@@ -247,6 +247,7 @@ def build_figure(df: pd.DataFrame, show: dict, show_bbc: bool = True, show_fwc: 
     fig.update_layout(
         title="<b>FWC 26 — Trafic horaire</b> · Visiteurs & Durée de session",
         height=580,
+        uirevision="stable",   # préserve zoom/pan entre les reruns Streamlit
         hovermode="x unified",
         shapes=shapes,
         annotations=annotations,
@@ -279,29 +280,50 @@ def build_figure(df: pd.DataFrame, show: dict, show_bbc: bool = True, show_fwc: 
     return fig
 
 
+# Valeurs par défaut des checkboxes
+CHECKBOX_DEFAULTS = {
+    "show_Total Visitors":     True,
+    "show_New Visitors":       False,
+    "show_Returning Visitors": False,
+    "show_Session (min)":      True,
+    "show_bbc":                True,
+    "show_fwc":                True,
+}
+
+def _init_session_state():
+    for key, val in CHECKBOX_DEFAULTS.items():
+        if key not in st.session_state:
+            st.session_state[key] = val
+
+
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 
 def sidebar_controls(df: pd.DataFrame):
+    _init_session_state()
+
     st.sidebar.title("⚽ FWC 26 · Filtres")
 
     if st.sidebar.button("🔄 Forcer la synchronisation Google Sheets"):
         load_data.clear()
+        # Remet les checkboxes à leurs valeurs par défaut
+        for key, val in CHECKBOX_DEFAULTS.items():
+            st.session_state[key] = val
         st.rerun()
 
     st.sidebar.markdown("---")
     st.sidebar.markdown("**Courbes affichées**")
 
     show = {
-        "Total Visitors":     st.sidebar.checkbox("Total Visitors",        value=True),
-        "New Visitors":       st.sidebar.checkbox("New Visitors",          value=False),
-        "Returning Visitors": st.sidebar.checkbox("Returning Visitors",    value=False),
-        "Session (min)":      st.sidebar.checkbox("Session moyenne (min)", value=True),
+        "Total Visitors":     st.sidebar.checkbox("Total Visitors",        key="show_Total Visitors"),
+        "New Visitors":       st.sidebar.checkbox("New Visitors",          key="show_New Visitors"),
+        "Returning Visitors": st.sidebar.checkbox("Returning Visitors",    key="show_Returning Visitors"),
+        "Session (min)":      st.sidebar.checkbox("Session moyenne (min)", key="show_Session (min)"),
     }
 
     st.sidebar.markdown("---")
     st.sidebar.markdown("**Événements**")
-    show_bbc = st.sidebar.checkbox("⚽ Matchs BBC", value=True)
-    show_fwc = st.sidebar.checkbox("🏆 Matchs FWC", value=True)
+    show_bbc = st.sidebar.checkbox("⚽ Matchs BBC", key="show_bbc")
+    show_fwc = st.sidebar.checkbox("🏆 Matchs FWC", key="show_fwc")
 
     st.sidebar.markdown("---")
     min_d = df["DateTime"].min().date()
@@ -320,10 +342,7 @@ def sidebar_controls(df: pd.DataFrame):
         (df["DateTime"] <  pd.Timestamp(end) + timedelta(days=1))
     ]
     st.sidebar.markdown("---")
-    st.sidebar.markdown(
-        f"**{len(filtered):,}** lignes · "
-        f"**{((filtered.get('BBC Match', '') != '') | (filtered.get('FWC Match', '') != '')).sum()}** match(s)"
-    )
+    st.sidebar.markdown(f"**{len(filtered):,}** lignes")
     return filtered, show, show_bbc, show_fwc
 
 
@@ -344,14 +363,13 @@ def main():
         st.warning("Aucune donnée pour la plage sélectionnée.")
         return
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Visiteurs totaux",   f"{int(filtered['Total Visitors'].sum()):,}")
     c2.metric("Session moy. (min)", f"{filtered['Session (min)'].mean():.1f}")
-    n_matches = pd.concat([
-        filtered["BBC Match"] if "BBC Match" in filtered.columns else pd.Series(dtype=str),
-        filtered["FWC Match"] if "FWC Match" in filtered.columns else pd.Series(dtype=str),
-    ]).pipe(lambda s: s[s != ""]).nunique()
-    c3.metric("Matchs détectés", n_matches)
+    n_bbc = (filtered["BBC Match"] != "").sum() if "BBC Match" in filtered.columns else 0
+    n_fwc = (filtered["FWC Match"] != "").sum() if "FWC Match" in filtered.columns else 0
+    c3.metric("Matchs BBC", int(n_bbc))
+    c4.metric("Matchs FWC", int(n_fwc))
 
     st.plotly_chart(build_figure(filtered, show, show_bbc, show_fwc), use_container_width=True)
 
