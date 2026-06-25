@@ -392,8 +392,20 @@ def main():
         daily_total = filtered["Total Visitors"].sum()
     c1.metric("Visiteurs totaux", f"{int(daily_total):,}")
     c2.metric("Session moy. (min)", f"{filtered['Session (min)'].mean():.1f}")
-    n_bbc = (filtered["BBC Match"] != "").sum() if "BBC Match" in filtered.columns else 0
-    n_fwc = (filtered["FWC Match"] != "").sum() if "FWC Match" in filtered.columns else 0
+    def _count_matches(col):
+        if col not in filtered.columns:
+            return 0
+        return (
+            filtered[col][filtered[col] != ""]
+            .str.split(" / ")
+            .explode()
+            .str.strip()
+            .pipe(lambda s: s[s != ""])
+            .count()
+        )
+
+    n_bbc = _count_matches("BBC Match")
+    n_fwc = _count_matches("FWC Match")
     c3.metric("Matchs BBC", int(n_bbc))
     c4.metric("Matchs FWC", int(n_fwc))
 
