@@ -130,6 +130,13 @@ def _clean(raw: pd.DataFrame) -> pd.DataFrame:
     for col in ["New Visitors", "Returning Visitors"]:
         df[col] = _to_numeric_col(df[col]) if col in df.columns else None
 
+    # Daily users : valeur présente uniquement à 00:00, on la propage sur toute la journée
+    if "Daily users" in df.columns:
+        df["Daily users"] = _to_numeric_col(df["Daily users"])
+        df["Daily Visitors"] = df["Daily users"].ffill()
+    else:
+        df["Daily Visitors"] = None
+
     df["BBC Match"] = _clean_match(df["BBC Matches"]) if "BBC Matches" in df.columns else ""
     df["FWC Match"] = _clean_match(df["FWC Matches"]) if "FWC Matches" in df.columns else ""
 
@@ -159,9 +166,10 @@ def load_data() -> pd.DataFrame:
 
 # Palette des courbes axe gauche
 LEFT_TRACES = {
-    "Total Visitors":    dict(color="#1a6cdb", fill=True),
-    "New Visitors":      dict(color="#16a34a", fill=False),
-    "Returning Visitors":dict(color="#9333ea", fill=False),
+    "Total Visitors":    dict(color="#1a6cdb", fill=True,  step=False),
+    "New Visitors":      dict(color="#16a34a", fill=False, step=False),
+    "Returning Visitors":dict(color="#9333ea", fill=False, step=False),
+    "Daily Visitors":    dict(color="#e63946", fill=False, step=True),
 }
 
 def _match_label(m):
@@ -186,7 +194,8 @@ def build_figure(df: pd.DataFrame, show: dict, show_bbc: bool = True, show_fwc: 
             name=col, yaxis="y1",
             mode="lines",
             visible=True if show.get(col, True) else "legendonly",
-            line=dict(color=style["color"], width=2),
+            line=dict(color=style["color"], width=2,
+                      shape="hv" if style.get("step") else "linear"),
             fill="tozeroy" if style["fill"] else "none",
             fillcolor="rgba(26,108,219,0.10)" if style["fill"] else None,
             customdata=hover_match,
@@ -228,7 +237,7 @@ def build_figure(df: pd.DataFrame, show: dict, show_bbc: bool = True, show_fwc: 
         for _, row in df[df["BBC Match"] != ""].iterrows():
             events[row["DateTime"]] = (
                 row["BBC Match"],
-                "rgba(200,30,30,0.6)", "#c01e1e", "⚽",
+                "rgba(200,30,30,0.6)", "#c01e1e", "🇬🇧",
             )
 
     shapes, annotations = [], []
@@ -294,6 +303,7 @@ CHECKBOX_DEFAULTS = {
     "show_Total Visitors":     True,
     "show_New Visitors":       False,
     "show_Returning Visitors": False,
+    "show_Daily Visitors":     False,
     "show_Session (min)":      True,
     "show_bbc":                True,
     "show_fwc":                True,
@@ -325,6 +335,7 @@ def sidebar_controls(df: pd.DataFrame):
         "Total Visitors":     st.sidebar.checkbox("Total Visitors",        key="show_Total Visitors"),
         "New Visitors":       st.sidebar.checkbox("New Visitors",          key="show_New Visitors"),
         "Returning Visitors": st.sidebar.checkbox("Returning Visitors",    key="show_Returning Visitors"),
+        "Daily Visitors":     st.sidebar.checkbox("Daily Visitors",        key="show_Daily Visitors"),
         "Session (min)":      st.sidebar.checkbox("Session moyenne (min)", key="show_Session (min)"),
     }
 
@@ -372,7 +383,14 @@ def main():
         return
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Visiteurs totaux",   f"{int(filtered['Total Visitors'].sum()):,}")
+    # Daily users est répété 24× par jour après ffill — on prend la valeur unique par jour
+    if "Daily users" in filtered.columns:
+        tmp = filtered.dropna(subset=["Daily users"]).copy()
+        tmp["_day"] = tmp["DateTime"].dt.date
+        daily_total = tmp.drop_duplicates(subset="_day")["Daily users"].sum()
+    else:
+        daily_total = filtered["Total Visitors"].sum()
+    c1.metric("Visiteurs totaux", f"{int(daily_total):,}")
     c2.metric("Session moy. (min)", f"{filtered['Session (min)'].mean():.1f}")
     n_bbc = (filtered["BBC Match"] != "").sum() if "BBC Match" in filtered.columns else 0
     n_fwc = (filtered["FWC Match"] != "").sum() if "FWC Match" in filtered.columns else 0
