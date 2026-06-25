@@ -12,6 +12,7 @@ from datetime import timedelta
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from streamlit_plotly_events import plotly_events
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -168,7 +169,7 @@ def _match_label(m):
     return m if (isinstance(m, str) and m.strip() not in ("", "nan", "none", "null")) else "Pas de match"
 
 
-def build_figure(df: pd.DataFrame, show: dict, show_bbc: bool = True, show_fwc: bool = True) -> go.Figure:
+def build_figure(df: pd.DataFrame, show: dict, show_bbc: bool = True, show_fwc: bool = True, xrange=None) -> go.Figure:
     fig = go.Figure()
 
     bbc_labels = df["BBC Match"].apply(_match_label) if "BBC Match" in df.columns else pd.Series("Pas de match", index=df.index)
@@ -270,6 +271,7 @@ def build_figure(df: pd.DataFrame, show: dict, show_bbc: bool = True, show_fwc: 
             rangeselector=dict(buttons=range_buttons),
             rangeslider=dict(visible=True, thickness=0.06),
             type="date",
+            **({"range": xrange} if xrange else {}),
         ),
         yaxis=dict(
             title="Visiteurs",
@@ -314,9 +316,9 @@ def sidebar_controls(df: pd.DataFrame):
 
     if st.sidebar.button("🔄 Forcer la synchronisation Google Sheets"):
         load_data.clear()
-        # Remet les checkboxes à leurs valeurs par défaut
         for key, val in CHECKBOX_DEFAULTS.items():
             st.session_state[key] = val
+        st.session_state.pop("zoom_range", None)
         st.rerun()
 
     st.sidebar.markdown("---")
@@ -331,7 +333,7 @@ def sidebar_controls(df: pd.DataFrame):
 
     st.sidebar.markdown("---")
     st.sidebar.markdown("**Événements**")
-    show_bbc = st.sidebar.checkbox("⚽ Matchs BBC", key="show_bbc")
+    show_bbc = st.sidebar.checkbox("🇬🇧 Matchs BBC", key="show_bbc")
     show_fwc = st.sidebar.checkbox("🏆 Matchs FWC", key="show_fwc")
 
     st.sidebar.markdown("---")
@@ -380,11 +382,19 @@ def main():
     c3.metric("Matchs BBC", int(n_bbc))
     c4.metric("Matchs FWC", int(n_fwc))
 
-    st.plotly_chart(
-        build_figure(filtered, show, show_bbc, show_fwc),
-        use_container_width=True,
-        key="main_chart",
-    )
+    # Capture les événements de zoom (relayout) pour mémoriser la plage X
+    fig = build_figure(filtered, show, show_bbc, show_fwc,
+                       xrange=st.session_state.get("zoom_range"))
+
+    relayout = plotly_events(fig, relayout_event=True, override_height=620, key="main_chart")
+
+    # Mémorise le zoom si l'utilisateur vient de zoomer/dé-zoomer
+    if relayout:
+        r = relayout[0] if isinstance(relayout, list) else relayout
+        if "xaxis.range[0]" in r and "xaxis.range[1]" in r:
+            st.session_state["zoom_range"] = [r["xaxis.range[0]"], r["xaxis.range[1]"]]
+        elif "xaxis.autorange" in r:
+            st.session_state.pop("zoom_range", None)
 
     with st.expander("📄 Données brutes"):
         cols = ["DateTime", "Total Visitors", "New Visitors", "Returning Visitors", "Session (min)", "BBC Match", "FWC Match"]
