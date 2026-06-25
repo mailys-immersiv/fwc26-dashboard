@@ -213,29 +213,38 @@ def build_figure(df: pd.DataFrame, show: dict, show_bbc: bool = True, show_fwc: 
     ))
 
     # ── Lignes verticales matchs ───────────────────────────────────────────
-    shapes, annotations = [], []
+    # Collecte tous les événements, BBC prioritaire sur FWC si même datetime
+    events: dict = {}  # datetime → (label, line_color, text_color, icon)
 
-    MATCH_STYLES = [
-        ("BBC Match", show_bbc, "rgba(200,30,30,0.6)",  "#c01e1e",  "🇬🇧"),
-        ("FWC Match", show_fwc, "rgba(30,120,200,0.6)", "#1a6cdb",  "🏆"),
-    ]
-    for match_col, visible, line_color, text_color, icon in MATCH_STYLES:
-        if not visible or match_col not in df.columns:
-            continue
-        for _, row in df[df[match_col] != ""].iterrows():
-            xv = row["DateTime"]
-            shapes.append(dict(
-                type="line", x0=xv, x1=xv,
-                yref="paper", y0=0, y1=1,
-                line=dict(color=line_color, width=1.5, dash="dash"),
-            ))
-            annotations.append(dict(
-                x=xv, yref="paper", y=1.01,
-                text=f"{icon} {row[match_col]}",
-                showarrow=False, textangle=-45,
-                font=dict(size=8.5, color=text_color),
-                xanchor="left",
-            ))
+    # FWC en premier (priorité basse)
+    if show_fwc and "FWC Match" in df.columns:
+        for _, row in df[df["FWC Match"] != ""].iterrows():
+            events[row["DateTime"]] = (
+                row["FWC Match"],
+                "rgba(30,120,200,0.6)", "#1a6cdb", "🏆",
+            )
+    # BBC en second (priorité haute — écrase FWC si même datetime)
+    if show_bbc and "BBC Match" in df.columns:
+        for _, row in df[df["BBC Match"] != ""].iterrows():
+            events[row["DateTime"]] = (
+                row["BBC Match"],
+                "rgba(200,30,30,0.6)", "#c01e1e", "⚽",
+            )
+
+    shapes, annotations = [], []
+    for xv, (label, line_color, text_color, icon) in events.items():
+        shapes.append(dict(
+            type="line", x0=xv, x1=xv,
+            yref="paper", y0=0, y1=1,
+            line=dict(color=line_color, width=1.5, dash="dash"),
+        ))
+        annotations.append(dict(
+            x=xv, yref="paper", y=1.01,
+            text=f"{icon} {label}",
+            showarrow=False, textangle=-45,
+            font=dict(size=8.5, color=text_color),
+            xanchor="left",
+        ))
 
     range_buttons = [
         dict(count=1, label="24 h",    step="day", stepmode="backward"),
@@ -371,7 +380,11 @@ def main():
     c3.metric("Matchs BBC", int(n_bbc))
     c4.metric("Matchs FWC", int(n_fwc))
 
-    st.plotly_chart(build_figure(filtered, show, show_bbc, show_fwc), use_container_width=True)
+    st.plotly_chart(
+        build_figure(filtered, show, show_bbc, show_fwc),
+        use_container_width=True,
+        key="main_chart",
+    )
 
     with st.expander("📄 Données brutes"):
         cols = ["DateTime", "Total Visitors", "New Visitors", "Returning Visitors", "Session (min)", "BBC Match", "FWC Match"]
